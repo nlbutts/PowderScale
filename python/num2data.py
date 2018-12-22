@@ -1,6 +1,6 @@
 import numpy as np
 import cv2
-from pytesseract import image_to_string
+#from pytesseract import image_to_string
 import pytesseract
 import time
 import glob
@@ -226,6 +226,12 @@ def preprocess_image(img, debug = False):
     #plot_contours(morph_image, 4000, 100, 1)
     filled_image, digits = process_contours(morph_image, 2400, 500, 250)
     
+    rect_digits = []
+    for d in digits:
+        r = cv2.boundingRect(d)
+        d = d[r[1]:r[1]+r[3], r[0]:r[0]+r[2]]
+        rect_digits.append(d)
+
     # This is to connect the characters together
     #filled_image2 = cv2.morphologyEx(filled_image, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15,15)))
     
@@ -237,7 +243,7 @@ def preprocess_image(img, debug = False):
         imgs = [cropped, blur, correction, edged_image, morph_image, filled_image]        
         debug_img = generate_grid(imgs, 1600, 900)
         display(debug_img, "debug", width = 1600, height=900)
-    return digits
+    return rect_digits
 
 def tf_mnist_train():
     mnist = tf.keras.datasets.mnist
@@ -288,53 +294,88 @@ def tf_test(model, digits):
         num += index[0]
         
     return num    
-    
-def train():
-    train_width = 40
-    train_height = 100
-
-    files = glob.glob("../data/*.png")
+   
+def create_training_data(cap, take_every_n_frame = 30, train_width = 10, train_height = 40):
 
     train_data = []
     response_data = []
 
-    for f in files:
-        img = cv2.imread(f)
-        m = re.match(".*scale_(.*).png", f)
-        value = float(m.groups(0)[0])
-        
-        digits = preprocess_image(img, True)
-        # Even images are training images, odd are test
-        print("Found {:} digits".format(len(digits)))
-        for i, d in enumerate(digits):
-            display(d, 'train')
-            print(d.shape)
-            key = cv2.waitKey(0)
-            cv2.destroyWindow('train')
-            print("Key pressed: {:}".format(key))
-            response_data.append(key)
-            small = cv2.resize(d, (train_width,train_height))
-            small = np.reshape(small, (train_width * train_height, 1))
-            train_data.append(small)
-            print('Inserted training data')
+    img_count = 0    
+    ret, img = cap.read()
+    while ret:
+        ret, img = cap.read()
+        if img_count < take_every_n_frame:
+            img_count += 1
+        else:
+            img_count = 0;
+            
+            digits = preprocess_image(img, True)
+            # Even images are training images, odd are test
+            print("Found {:} digits".format(len(digits)))
+            for i, d in enumerate(digits):
+                display(d, 'train')
+                print(d.shape)
+                key = cv2.waitKey(0)
+                cv2.destroyWindow('train')
+                print("Key pressed: {:}".format(key))
+                if key != ord(' '):
+                    response_data.append(key)
+                    small = resize(d, train_width, train_height)
+                    small = small.reshape((small.shape[0] * small.shape[1]))
+                    small = np.concatenate((small, np.zeros(train_width * train_height - small.shape[0])))
+                    train_data.append(small)
+                    print('Inserted training data')
     
    
     np.save('train_data', train_data)
     np.save('response_data', response_data)
     
+def train():
+    train_data = np.load('train_data.npy')
+    response_data = np.load('response_data.npy')
+    
+    # Convert the response data into one hot encoding
+    y_train = np.zeros((len(response_data), 10), np.float32)
+    response_data -= ord('0')
+    for i, v in enumerate(response_data):
+        y_train[i, v] = 1        
+
+    train_data = train_data.astype('float32')    
+    response_data = response_data.astype('float32')
+
+    #data = cv2.ml.TrainData_create(train_data, cv2.ml.ROW_SAMPLE, y_train)
+    model = cv2.ml.KNearest_create()
+    model.train(train_data, cv2.ml.ROW_SAMPLE, response_data )
+
+    return model
+    
+def ml_test(model, digits, train_width = 10, train_height = 40):
+    for d in digits:
+        small = resize(d, train_width, train_height)
+        small = small.reshape((small.shape[0] * small.shape[1]))
+        small = np.concatenate((small, np.zeros(train_width * train_height - small.shape[0])))
+        small = small.astype('float32')
+        small = small.reshape((1, small.shape[0]))
+        ret, results = model.predict(small)
+        print(ret)
+        print(results)
+
 def run():
     cap = cv2.VideoCapture('../data/test.mp4')        
-    model = tf_mninst_load('checkpoints/mninst')
+    #model = tf_mninst_load('checkpoints/mninst')
+    model = train()
     while cap.isOpened():
         ret, img = cap.read()
         while ret:
             ret, img = cap.read()
             digits = preprocess_image(img, True)
-            num = tf_test(model, digits)            
+            ml_test(model, digits)
+            #num = tf_test(model, digits)            
             print('Detected number: {:}'.format(num))
             time.sleep(0.25)
 
     
 #train()    
 #tf_mnist_train()
-run()
+#run()
+print('Hello')
