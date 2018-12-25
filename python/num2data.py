@@ -56,7 +56,7 @@ def display_channels(img):
     cv2.imshow("Blue", img[:,:,0])
     cv2.waitKey(1)
 
-def generate_grid(imgs, grid_width, grid_height):
+def generate_grid(imgs, grid_width, grid_height, labels = None):
     """Helper function to generate a grid of images. It is currently
     hard coded to display a grid of 2 images wide by three images high (6 images)
     
@@ -67,27 +67,34 @@ def generate_grid(imgs, grid_width, grid_height):
     grid_width -- the max width of the entire grid
     grid_height -- the max height of the entire grid
     """
-    new_img = np.zeros((grid_height, grid_width, 3), np.uint8)
+    width = 1800
+    height = 800
+    
+    new_img = np.zeros((height, width, 3), np.uint8)
 
-    num_imgs = len(imgs)
     # always a grid of 2
-    img_width = grid_width // 2
-    img_height = int(grid_height / 3)
+    img_width = width // grid_width
+    img_height = int(height // grid_height)
     
     x = 0
     y = 0
-    for i in imgs:
-        ri = resize(i, img_width, img_height)
+    for i, img in enumerate(imgs):
+        ri = resize(img, img_width, img_height)
         if len(ri.shape) == 2:
             # Convert to color
             ri = cv2.cvtColor(ri, cv2.COLOR_GRAY2BGR)
-        new_img[y:y + ri.shape[0], x:x + ri.shape[1], :] = ri
+        xstart = x * img_width
+        ystart = y * img_height
+        new_img[ystart:ystart + ri.shape[0], xstart:xstart + ri.shape[1], :] = ri
+        if labels is not None:
+            print("i: {:} -- x/y: {:}/{:} -- label: {:}".format(i, xstart, ystart, labels[i]))
+            cv2.putText(new_img, labels[i], (xstart + 10, ystart + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255))
 
-        x += img_width
+        x += 1
         if x >= grid_width:
             x = 0
-            y += img_height
-
+            y += 1
+            
     return new_img
    
 def crop_blue(img, debug=False):
@@ -315,7 +322,7 @@ def preprocess_image(img, debug = False):
     
     # This produced nice contour images
     #plot_contours(morph_image, 4000, 100, 1)
-    filled_image, digits = process_contours(thres, (900, 10000), (100, 800), (0, 1), debug)
+    filled_image, digits = process_contours(thres, (900, 10000), (100, 800), (0, 1), False)
     
     rect_digits = []
     for d in digits:
@@ -325,7 +332,7 @@ def preprocess_image(img, debug = False):
 
     if debug:
         imgs = [cropped, gray, blur, thres, filled_image]
-        debug_img = generate_grid(imgs, 1600, 900)
+        debug_img = generate_grid(imgs, 2, 3)
         display(debug_img, "debug", width = 1600, height=900)
     return rect_digits
        
@@ -360,13 +367,12 @@ def create_training_data(cap, take_every_n_frame = 30, train_width = 10, train_h
                 key = cv2.waitKey(0)
                 cv2.destroyWindow('train')
                 print("Key pressed: {:}".format(key))
-                if key != ord(' '):
-                    response_data.append(key)
-                    small = resize(d, train_width, train_height)
-                    small = small.reshape((small.shape[0] * small.shape[1]))
-                    small = np.concatenate((small, np.zeros(train_width * train_height - small.shape[0])))
-                    train_data.append(small)
-                    print('Inserted training data')
+                response_data.append(key)
+                small = resize(d, train_width, train_height)
+                #small = small.reshape((small.shape[0] * small.shape[1]))
+                #small = np.concatenate((small, np.zeros(train_width * train_height - small.shape[0])))
+                train_data.append(small)
+                print('Inserted training data')
     
    
     np.save('train_data', train_data)
@@ -378,6 +384,8 @@ def train():
 
     train_data = np.load('train_data.npy')
     response_data = np.load('response_data.npy')
+    train_width = 10
+    train_height = 40
     
     # Convert the response data into one hot encoding
     y_train = np.zeros((len(response_data), 10), np.float32)
@@ -385,15 +393,22 @@ def train():
     for i, v in enumerate(response_data):
         y_train[i, v] = 1        
 
-    train_data = train_data.astype('float32')    
+    x_train = []
+    for t in train_data:
+        t = t.reshape((t.shape[0] * t.shape[1]))
+        t = np.concatenate((t, np.zeros(train_width * train_height - t.shape[0])))
+        x_train.append(t)
+
+    x_train = np.array(x_train)
+    x_train = x_train.astype('float32')    
     response_data = response_data.astype('float32')
 
-    train_data /= 255
+    x_train /= 255
 
     model = cv2.ml.KNearest_create()
     #model = cv2.ml.SVMSGD_create()
     #model = cv2.ml.ANN_MLP_create()
-    model.train(train_data, cv2.ml.ROW_SAMPLE, response_data)
+    model.train(x_train, cv2.ml.ROW_SAMPLE, response_data)
 
     model.save('model')
 
@@ -432,6 +447,12 @@ def ml_test(model, digits, train_width = 10, train_height = 40, debug = False):
         
     return num
 
+def hu_numbers():
+    numbers = np.load('numbers.npy')
+    for n in numbers:
+        mom = cv2.moments(n)
+        hu = cv2.HuMoments(mom)
+        print(hu)        
 
 def run_training():
     cap = cv2.VideoCapture('../data/test.mp4')        
@@ -447,12 +468,12 @@ def run():
         while ret:
             ret, img = cap.read()
             digits = preprocess_image(img, True)
-            #num = ml_test(model, digits, debug = True)
-            #print('Detected number: {:}'.format(num))
+            num = ml_test(model, digits, debug = True)
+            print('Detected number: {:}'.format(num))
             time.sleep(0.1)
 
 
-run_training()
-#run()    
+#run_training()
+run()    
 #test_thres()
 print('Hello')
