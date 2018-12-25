@@ -117,93 +117,90 @@ def crop_blue(img, debug=False):
     
     return rotated 
 
-def plot_contours(img, high = 2200, low = 500, max_arc = 250, delay = 1):
+def plot_contours(img, area_limit, arc_limit, aspect_limit, delay = 1):
     """This function takes plots the detected contours one at a time
     
     Keyword arguments:
     img -- the image to display
-    high -- the maximum contour area to plot
-    low -- the minimum contour area to plot
-    max_arc -- the maximum arc length 
+    area_limit - the min and max area limit
+    arc_limit -- the min and max arc
+    aspect_limit -- the min and max aspect ratio
     delay -- how long to delay between each contour plot
     """
 
     image, contours, heirarchy = cv2.findContours(img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    top_cntrs = sorted(contours, key = cv2.contourArea, reverse = True)
     draw_img = np.zeros((img.shape[0], img.shape[1], 3), np.uint8)
-    
-    cx_array = []
-    cy_array = []
-    
+        
     for i, c in enumerate(contours):
         cnt = cv2.approxPolyDP(c, 1, True)
         area = cv2.contourArea(cnt)
         arc = cv2.arcLength(cnt, True)
         
-        if (area > low) and (area < high) and (arc < max_arc):
-            temp = np.random.rand(3) * 255            
-            color = (int(temp[0]), int(temp[1]), int(temp[2]))
-            draw_img = cv2.drawContours(draw_img, [cnt], 0, color, -1)
-            txt = str(i)            
-            #cv2.putText(draw_img, txt, )
-            display(draw_img, 'Contours', delay = delay)
-
-            mom = cv2.moments(cnt)
+        if (area > area_limit[0]) and (area < area_limit[1]) and (arc > arc_limit[0]) and (arc < arc_limit[1]):
+            mom = cv2.moments(cnt, True)
             cx = mom['m10'] / mom['m00']
             cy = mom['m01'] / mom['m00']
-            cx_array.append(cx)
-            cy_array.append(cy)
-            print('Contour: {:} -- area: {:0.1f} -- arc: {:0.1f} -- cx: {:0.1f}, cy: {:0.1f}'.format(i, area, arc, cx, cy))
-            time.sleep(delay)
+            r = cv2.boundingRect(cnt)
+            aspect = r[2] / r[3]
+            if aspect > 1:
+                aspect = 1 / aspect
+            if (aspect > aspect_limit[0]) and (aspect < aspect_limit[1]):
+                print('Contour: {:} -- area: {:0.1f} -- arc: {:0.1f} -- cx: {:0.1f}, cy: {:0.1f}, aspect: {:}'.format(i, area, arc, cx, cy, aspect))
+    
+                temp = np.random.rand(3) * 255            
+                color = (int(temp[0]), int(temp[1]), int(temp[2]))
+                draw_img = cv2.drawContours(draw_img, [cnt], 0, color, -1)
+                txt = str(i)            
+                cv2.putText(draw_img, txt, (int(cx), int(cy)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255))
+
+    display(draw_img, 'Contours', delay = delay)
 
 
-def process_contours(img, high = 4000, low = 500, max_arc = 250, offset = 30, sep_threshold = 50, debug = False):
+def process_contours(img, area_limit, arc_limit, aspect_limit, debug = False):
     """This function finds the contours and returns what it things are full digits
     
     Keyword arguments:
     img -- the image to display
-    high -- the maximum contour area to plot
-    low -- the minimum contour area to plot
-    max_arc -- the maximum arc length 
-    offset -- Adds some boundry between the found contour and what it considers the start of the contour
-    sep_threshold -- If two contours are further apart than this, it will be consider part of a different digit
+    area_limit - the min and max area limit
+    arc_limit -- the min and max arc
+    aspect_limit -- the min and max aspect ratio
     debug -- display debug data
     """
 
+    digit_cntrs = []
     image, contours, heirarchy = cv2.findContours(img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     top_cntrs = sorted(contours, key = cv2.contourArea, reverse = True)
     draw_img = np.zeros(img.shape, np.uint8)
-    cx_array = []
-    cy_array = []
     for i in range(len(contours)):
         cnt = cv2.approxPolyDP(top_cntrs[i], 1, True)
         area = cv2.contourArea(cnt)
         arc = cv2.arcLength(cnt, True)
         
-        if (area > low) and (area < high) and (arc < max_arc):
-            draw_img = cv2.drawContours(draw_img, [cnt], 0, 255, -1)
-
-            mom = cv2.moments(cnt)
+        if (area > area_limit[0]) and (area < area_limit[1]) and (arc > arc_limit[0]) and (arc < arc_limit[1]):
+            mom = cv2.moments(cnt, True)
             cx = mom['m10'] / mom['m00']
             cy = mom['m01'] / mom['m00']
-            cx_array.append(cx)
-            cy_array.append(cy)
+            r = cv2.boundingRect(cnt)
+            aspect = r[2] / r[3]
+            if aspect > 1:
+                aspect = 1 / aspect
+            if (aspect > aspect_limit[0]) and (aspect < aspect_limit[1]):
+                digit_cntrs.append(cnt)
+                draw_img = cv2.drawContours(draw_img, [cnt], 0, 255, -1)
 
 
-    cx_sorted = sorted(cx_array)
-    diffx = np.diff(cx_sorted)
-           
+    morph_kernel = 25
+    morph = cv2.morphologyEx(draw_img, cv2.MORPH_DILATE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (morph_kernel , morph_kernel)))
+    image, contours, heirarchy = cv2.findContours(morph, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
     digits = []
-    start = int(cx_sorted[0] - offset)
-    for i, d in enumerate(diffx):
-        if d > sep_threshold:
-            stop = int(cx_sorted[i] + diffx[i] // 2)
-            #print("i: {:} -- start: {:} -- stop: {:}".format(i, start, stop))
-            digits.append(draw_img[0:draw_img.shape[0], start:stop])
-            start = stop
+    for c in contours:
+        r = cv2.boundingRect(c)
+        d = draw_img[r[1]:r[1]+r[3], r[0]:r[0]+r[2]]
+        digits.append(d)
    
     if debug:
-        plot_contours(img, high, low, max_arc, 0.25)
+        plot_contours(img, area_limit, arc_limit, aspect_limit)
             
     return draw_img, digits
 
@@ -234,7 +231,7 @@ def find_connected_lines(img, threshold = 80, min_length = 30, gap = 10, debug =
                 color = (int(temp[0]), int(temp[1]), int(temp[2]))                
                 disp_img = cv2.line(disp_img, start, stop, color, 1)
                 cv2.imshow('hough', disp_img)
-
+                
 
     if debug:
         display(disp_img, 'hough', width=1000)
@@ -264,27 +261,37 @@ def apply_correction(img):
     return y
 
 def test_thres():
-    blur_amt = 11
-    sigmaX = 0.5
-    sigmaY = 0.5
+    blur_amt = 7
+    sigmaX = 0.9
+    sigmaY = 0.9
     sigmaColor = 0.5
     sigmaSpace = 0.5
     block_size = 5
     C = -2
+    morph_kernel = 9
+    thres1 = 25
+    thres2 = 50
 
-    img = cv2.imread('../data/scale_8.0.png')
+    img = cv2.imread('../data/scale_13.9.png')
     
     cropped = crop_blue(img)
     gray = cropped[:, :, 1]
-    blur1 = cv2.blur(gray, (blur_amt, blur_amt))
-    blur2 = cv2.medianBlur(gray, blur_amt)
-    blur3 = cv2.GaussianBlur(gray, (blur_amt, blur_amt), sigmaX, sigmaY)
-    blur4 = cv2.bilateralFilter(gray, blur_amt, sigmaColor, sigmaSpace)
+    correction = apply_correction(gray)
+    correction = gray
+    blur1 = cv2.blur(correction, (blur_amt, blur_amt))
+    blur2 = cv2.medianBlur(correction, blur_amt)
+    blur3 = cv2.GaussianBlur(correction, (blur_amt, blur_amt), sigmaX, sigmaY)
+    blur4 = cv2.bilateralFilter(correction, blur_amt, sigmaColor, sigmaSpace)
 
     t1 = cv2.adaptiveThreshold(blur2, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, block_size, C)
-    t2 = cv2.adaptiveThreshold(blur2, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, block_size, C)
+    ret, t2 = cv2.threshold(blur2, 50, 255, cv2.THRESH_BINARY_INV)
+    #t2 = cv2.adaptiveThreshold(blur2, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, block_size, C)
+    #t3 = cv2.Canny(blur, thres1, thres2)
 
-    imgs = [blur1, blur2, blur3, blur4, t1, t2]
+    morph = cv2.morphologyEx(t2, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (morph_kernel , morph_kernel)))
+
+
+    imgs = [cropped, blur2, t1, t2, morph]
     debug_img = generate_grid(imgs, 1600, 900)
     display(debug_img, "debug", width = 1600, height=900)
 
@@ -298,27 +305,17 @@ def preprocess_image(img, debug = False):
     delay -- how long to delay between each contour plot
     """
 
-    blur_amt = 11
-    morph_kernel = 11
-    block_size = 15
-
+    blur_amt = 7
+    bw_threshold = 50
+    
     cropped = crop_blue(img)
     gray = cropped[:, :, 1]
     blur = cv2.medianBlur(gray, blur_amt)
-    correction = apply_correction(blur)
-
-    edged_image = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, block_size, C)
-
-    # Trial and error
-    #edged_image = cv2.adaptiveThreshold(blur, 255, cv2.ADA)
-    #edged_image = cv2.Canny(correction, canny_threshold1, canny_threshold2)
-    
-    # This kernel produced nice looking edges
-    morph_image= cv2.morphologyEx(edged_image, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (morph_kernel , morph_kernel)))
+    ret, thres = cv2.threshold(blur, bw_threshold, 255, cv2.THRESH_BINARY_INV)
     
     # This produced nice contour images
     #plot_contours(morph_image, 4000, 100, 1)
-    filled_image, digits = process_contours(edged_image, 2400, 500, 250)
+    filled_image, digits = process_contours(thres, (900, 10000), (100, 800), (0, 1), debug)
     
     rect_digits = []
     for d in digits:
@@ -327,7 +324,7 @@ def preprocess_image(img, debug = False):
         rect_digits.append(d)
 
     if debug:
-        imgs = [cropped, blur, edged_image, filled_image, digits[0]]
+        imgs = [cropped, gray, blur, thres, filled_image]
         debug_img = generate_grid(imgs, 1600, 900)
         display(debug_img, "debug", width = 1600, height=900)
     return rect_digits
@@ -452,9 +449,10 @@ def run():
             digits = preprocess_image(img, True)
             #num = ml_test(model, digits, debug = True)
             #print('Detected number: {:}'.format(num))
-            time.sleep(0.25)
+            time.sleep(0.1)
 
 
-run()    
+run_training()
+#run()    
 #test_thres()
 print('Hello')
