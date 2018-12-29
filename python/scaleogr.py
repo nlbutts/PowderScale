@@ -3,11 +3,13 @@ import cv2
 import time
 import glob
 import re
+import os
 
 class ScaleOGR():
-    def __init__(self, debug = False):
+    def __init__(self, debug = False, saveimg = False):
         self.model = self.train()
         self.debug = debug
+        self.saveimg = saveimg
 
     def resize(self, img, max_width, max_height):
         """Image resize helper. This reszie function will intelligently resize
@@ -110,6 +112,9 @@ class ScaleOGR():
         img -- the image to display
         """
 
+        crop_height = 50
+        crop_width = 50
+
         b = img[:,:,0]
         bb = cv2.blur(b, (15,15))
         ret, t = cv2.threshold(bb, 200, 255, cv2.THRESH_BINARY)
@@ -124,7 +129,7 @@ class ScaleOGR():
         if self.debug:
             self.display(rotated , "Cropped")
 
-        rotated = rotated[:, 50::]
+        rotated = rotated[crop_height:-crop_height, crop_width:-crop_width]
 
         return rotated
 
@@ -179,10 +184,9 @@ class ScaleOGR():
 
         digit_cntrs = []
         contours, heirarchy = cv2.findContours(img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        top_cntrs = sorted(contours, key = cv2.contourArea, reverse = True)
         draw_img = np.zeros(img.shape, np.uint8)
-        for i in range(len(contours)):
-            cnt = cv2.approxPolyDP(top_cntrs[i], 1, True)
+        for i, c in enumerate(contours):
+            cnt = cv2.approxPolyDP(c, 1, True)
             area = cv2.contourArea(cnt)
             arc = cv2.arcLength(cnt, True)
 
@@ -203,9 +207,11 @@ class ScaleOGR():
         morph = cv2.morphologyEx(draw_img, cv2.MORPH_DILATE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (morph_kernel , morph_kernel)))
         contours, heirarchy = cv2.findContours(morph, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
+        bb = [cv2.boundingRect(c) for c in contours]
+        sorted_bb = sorted(bb, key=lambda cx: cx[0])
+
         digits = []
-        for c in contours:
-            r = cv2.boundingRect(c)
+        for r in sorted_bb:
             d = draw_img[r[1]:r[1]+r[3], r[0]:r[0]+r[2]]
             digits.append(d)
 
@@ -247,24 +253,48 @@ class ScaleOGR():
         bw_threshold = 50
 
         cropped = self.crop_blue(img)
-        gray = cropped[:, :, 1]
-        blur = cv2.medianBlur(gray, blur_amt)
-        ret, thres = cv2.threshold(blur, bw_threshold, 255, cv2.THRESH_BINARY_INV)
+        if self.saveimg:
+            files = glob.glob("*.bmp")
+            for f in files:
+                os.remove(f)
+            cv2.imwrite("orig.bmp", img)
+            cv2.imwrite("cropped.bmp", cropped)
 
-        # This produced nice contour images
-        filled_image, digits = self.process_contours(thres, (900, 10000), (100, 800), (0, 1))
+        w = cropped.shape[1]
+        h = cropped.shape[0]
+        if (w > 100) and (h > 100):
+            gray = cropped[:, :, 1]
+            blur = cv2.medianBlur(gray, blur_amt)
+            ret, thres = cv2.threshold(blur, bw_threshold, 255, cv2.THRESH_BINARY_INV)
 
-        rect_digits = []
-        for d in digits:
-            r = cv2.boundingRect(d)
-            d = d[r[1]:r[1]+r[3], r[0]:r[0]+r[2]]
-            rect_digits.append(d)
+            # This produced nice contour images
+            filled_image, digits = self.process_contours(thres, (900, 10000), (100, 800), (0, 1))
 
-        if self.debug:
-            imgs = [cropped, gray, blur, thres, filled_image]
-            debug_img = self.generate_grid(imgs, 2, 3)
-            self.display(debug_img, "debug", width = 1600, height=900)
-        return rect_digits
+            rect_digits = []
+            for i, d in enumerate(digits):
+                r = cv2.boundingRect(d)
+                d = d[r[1]:r[1]+r[3], r[0]:r[0]+r[2]]
+                rect_digits.append(d)
+
+                if self.saveimg:
+                    s = "digit{:02}.bmp".format(i)
+                    cv2.imwrite(s, d)
+
+            if self.debug:
+                imgs = [cropped, gray, blur, thres, filled_image]
+                debug_img = self.generate_grid(imgs, 2, 3)
+                self.display(debug_img, "debug", width = 1600, height=900)
+
+            if self.saveimg:
+                cv2.imwrite("orig.bmp", img)
+                cv2.imwrite("cropped.bmp", cropped)
+                cv2.imwrite("blur.bmp", blur)
+                cv2.imwrite("thres.bmp", thres)
+                cv2.imwrite("filled_image.bmp", filled_image)
+
+            return rect_digits
+
+        return None
 
     def create_training_data(self, cap, take_every_n_frame = 30, train_width = 10, train_height = 40):
         """This function creates a data set for the machine learning system
@@ -298,8 +328,6 @@ class ScaleOGR():
                     print("Key pressed: {:}".format(key))
                     response_data.append(key)
                     small = self.resize(d, train_width, train_height)
-                    #small = small.reshape((small.shape[0] * small.shape[1]))
-                    #small = np.concatenate((small, np.zeros(train_width * train_height - small.shape[0])))
                     train_data.append(small)
                     print('Inserted training data')
 
@@ -340,7 +368,7 @@ class ScaleOGR():
 
         return model
 
-    def ml_digit(self, digits, train_width = 10, train_height = 40, debug = False):
+    def ml_digit(self, digits, train_width = 10, train_height = 40):
         """This function takes the model and the digits and returns the
         detected numbers
 
@@ -360,18 +388,18 @@ class ScaleOGR():
             small = small.astype('float32')
             p.append(small)
 
-        p = np.array(p)
-        ret, results = self.model.predict(p)
+        num = 0
+        if len(p) > 0:
+            p = np.array(p)
+            ret, results = self.model.predict(p)
+            for r in results:
+                num *= 10
+                num += r[0]
 
-        if debug:
+        if self.debug:
             print('Predict ret: {:} -- results: {:}'.format(ret, results))
 
-        num = 0
-        for r in results:
-            num *= 10
-            num += r[0]
-
-        return num
+        return num / 10
 
     def run_training(self):
         """This function performs the training operation on a pre-recorded
@@ -388,7 +416,11 @@ class ScaleOGR():
         Keyword arguments:
         img -- The image to process
         """
+        num = 0
         digits = self.preprocess_image(img)
-        num = self.ml_digit(digits)
+        if digits is not None:
+            num = self.ml_digit(digits)
+        else:
+            print('Unable to detect digits')
 
         return num

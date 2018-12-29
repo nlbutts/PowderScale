@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 from scaleogr import ScaleOGR
 import cv2
 from picamera.array import PiRGBArray
@@ -16,15 +18,17 @@ def run(ogr):
     else:
         print("Test file not found")
 
-s = ScaleOGR()
+s = ScaleOGR(False, False)
 
 
 camera = PiCamera()
-rawCapture = PiRGBArray(camera)
+camera.resolution = (1920,1088)
+camera.framerate = 30
+rawCapture = PiRGBArray(camera, size=(1920,1088))
 
-while True:
-    camera.capture(rawCapture, format="bgr")
+for frame in camera.capture_continuous(rawCapture, format="bgr",  use_video_port=True):
     image = rawCapture.array
     num = s.process(image)
     print('Detected number: {:}'.format(num))
-    time.sleep(0.1)
+    rawCapture.truncate(0)
+    #time.sleep(0.1)
