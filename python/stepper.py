@@ -85,18 +85,3 @@ class Stepper():
     def reset(self):
         self.spi.xfer([0xC0])
 
-s = Stepper(1000000)
-s.get_status()
-s.dump_settings()
-#s.set_mode(0x80)
-s.dump_settings()
-s.run(1000, 1)
-
-spd = 0
-
-while True:
-    s.get_status()
-    time.sleep(1)
-    #s.run(spd, 1)
-    spd += 1000
-

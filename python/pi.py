@@ -5,6 +5,7 @@ import cv2
 from picamera.array import PiRGBArray
 from picamera import PiCamera
 import time
+from stepper import Stepper
 
 def run(ogr):
     print("Testing")
@@ -18,9 +19,27 @@ def run(ogr):
     else:
         print("Test file not found")
 
-s = ScaleOGR(False, False)
+class Filter():
+    def __init__(self, gain):
+        self.gain = gain
+        self.filtered_value = 0
+
+    def filter(self, value):
+        err = value - self.filtered_value
+        newV = err * self.gain
+        self.filtered_value += newV
+
+        return self.filtered_value
 
 
+set_point = 26.0
+
+ogr = ScaleOGR(False, False)
+stepper = Stepper(1000000)
+f = Filter(0.5)
+
+camera = PiCamera()
+camera.close()
 camera = PiCamera()
 camera.resolution = (1920,1088)
 camera.framerate = 30
@@ -28,7 +47,13 @@ rawCapture = PiRGBArray(camera, size=(1920,1088))
 
 for frame in camera.capture_continuous(rawCapture, format="bgr",  use_video_port=True):
     image = rawCapture.array
-    num = s.process(image)
-    print('Detected number: {:}'.format(num))
+    num = ogr.process(image)
+    fv = f.filter(num)
+    print('Detected number: {:} -- Filtered number: {:}'.format(num, fv))
     rawCapture.truncate(0)
-    #time.sleep(0.1)
+
+    if fv < set_point:
+        stepper.run(1000, 1)
+    else:
+        stepper.stop()
+        camera.close()
