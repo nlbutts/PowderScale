@@ -379,6 +379,9 @@ class ScaleOGR():
         train_height -- The max height of the training image
         """
 
+        ret = False
+        results = 0
+
         p = []
 
         for d in digits:
@@ -422,5 +425,8 @@ class ScaleOGR():
             num = self.ml_digit(digits)
         else:
             print('Unable to detect digits')
+
+        if self.debug:
+            print("Detected value: {:}".format(num))
 
         return num

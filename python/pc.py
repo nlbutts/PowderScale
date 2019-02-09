@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 from scaleogr import ScaleOGR
 import cv2
 import time
