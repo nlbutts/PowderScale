@@ -6,7 +6,8 @@ import time
 
 def run(ogr):
     print("Testing")
-    cap = cv2.VideoCapture('../data/test.mp4')
+    cap = cv2.VideoCapture(r'C:\ztemp\test.mp4')
+    #cap = cv2.VideoCapture('../data/test.mp4')
     if cap.isOpened():
         ret, img = cap.read()
         while ret:

@@ -111,27 +111,31 @@ class ScaleOGR():
         Keyword arguments:
         img -- the image to display
         """
-
-        crop_height = 50
-        crop_width = 50
-
-        b = img[:,:,0]
-        bb = cv2.blur(b, (15,15))
-        ret, t = cv2.threshold(bb, 200, 255, cv2.THRESH_BINARY)
+        rotated = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        size = rotated.shape
+        b = rotated[:,:,0]
+        bb = cv2.blur(b, (25,25))
+        ret, t = cv2.threshold(bb, 240, 255, cv2.THRESH_BINARY)
+    
         contours, heirarchy = cv2.findContours(t, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         sorted_contours = sorted(contours, key = cv2.contourArea, reverse = True)
-
+        minRect = cv2.minAreaRect(sorted_contours[0])
+    
+        R = cv2.getRotationMatrix2D(minRect[0], minRect[2], 1)
+        rotated2 = cv2.warpAffine(rotated, R, (size[1], size[0]))
+      
         display_rect = cv2.boundingRect(sorted_contours[0])
-        cropped = img[display_rect[1]:display_rect[1] + display_rect[3], display_rect[0]:display_rect[0] + display_rect[2], :]
-
-        rotated = cv2.rotate(cropped, cv2.ROTATE_90_COUNTERCLOCKWISE)
-
+        display_rect = np.array(display_rect)
+        display_rect[0] = display_rect[0] + 80
+        display_rect[1] = display_rect[1] + 20
+        display_rect[2] = display_rect[2] - 200
+        display_rect[3] = display_rect[3] - 80
+        cropped = rotated2[display_rect[1]:display_rect[1] + display_rect[3], display_rect[0]:display_rect[0] + display_rect[2], :]
+    
         if self.debug:
-            self.display(rotated , "Cropped")
+            self.display(cropped , "Cropped")
 
-        rotated = rotated[crop_height:-crop_height, crop_width:-crop_width]
-
-        return rotated
+        return cropped
 
     def plot_contours(self, img, area_limit, arc_limit, aspect_limit, delay = 1):
         """This function takes plots the detected contours one at a time
@@ -250,7 +254,7 @@ class ScaleOGR():
         """
 
         blur_amt = 7
-        bw_threshold = 50
+        bw_threshold = 200
 
         cropped = self.crop_blue(img)
         if self.saveimg:
@@ -265,6 +269,7 @@ class ScaleOGR():
         if (w > 100) and (h > 100):
             gray = cropped[:, :, 1]
             blur = cv2.medianBlur(gray, blur_amt)
+            blur = self.apply_correction(blur)
             ret, thres = cv2.threshold(blur, bw_threshold, 255, cv2.THRESH_BINARY_INV)
 
             # This produced nice contour images
