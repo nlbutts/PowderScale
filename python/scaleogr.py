@@ -7,7 +7,7 @@ import os
 
 class ScaleOGR():
     def __init__(self, debug = False, saveimg = False):
-        self.model = self.train()
+        self.model = None
         self.debug = debug
         self.saveimg = saveimg
 
@@ -129,7 +129,7 @@ class ScaleOGR():
         display_rect[0] = display_rect[0] + 80
         display_rect[1] = display_rect[1] + 20
         display_rect[2] = display_rect[2] - 200
-        display_rect[3] = display_rect[3] - 80
+        display_rect[3] = display_rect[3] - 60
         cropped = rotated2[display_rect[1]:display_rect[1] + display_rect[3], display_rect[0]:display_rect[0] + display_rect[2], :]
     
         if self.debug:
@@ -254,7 +254,7 @@ class ScaleOGR():
         """
 
         blur_amt = 7
-        bw_threshold = 200
+        bw_threshold = 240
 
         cropped = self.crop_blue(img)
         if self.saveimg:
@@ -279,7 +279,12 @@ class ScaleOGR():
             for i, d in enumerate(digits):
                 r = cv2.boundingRect(d)
                 d = d[r[1]:r[1]+r[3], r[0]:r[0]+r[2]]
-                rect_digits.append(d)
+
+                # Filter bad extracts by aspect ratio
+                if (d.shape[0] / d.shape[1]) >= 1.6:
+                    rect_digits.append(d)
+
+                #print('Digit Aspect: {:}'.format(d.shape[0] / d.shape[1]))
 
                 if self.saveimg:
                     s = "digit{:02}.bmp".format(i)
@@ -287,7 +292,7 @@ class ScaleOGR():
 
             if self.debug:
                 imgs = [cropped, gray, blur, thres, filled_image]
-                debug_img = self.generate_grid(imgs, 2, 3)
+                debug_img = self.generate_grid(imgs, 2, 3)                
                 self.display(debug_img, "debug", width = 1600, height=900)
 
             if self.saveimg:
@@ -297,7 +302,10 @@ class ScaleOGR():
                 cv2.imwrite("thres.bmp", thres)
                 cv2.imwrite("filled_image.bmp", filled_image)
 
-            return rect_digits
+            if len(rect_digits) == 0:
+                return None
+            else:
+                return rect_digits
 
         return None
 
@@ -314,6 +322,7 @@ class ScaleOGR():
         train_data = []
         response_data = []
 
+        bad_img_count = 0
         img_count = 0
         ret, img = cap.read()
         while ret:
@@ -323,12 +332,18 @@ class ScaleOGR():
             else:
                 img_count = 0;
 
-                digits = self.preprocess_image(img, True)
+                digits = self.preprocess_image(img)
                 # Even images are training images, odd are test
                 print("Found {:} digits".format(len(digits)))
                 for i, d in enumerate(digits):
                     self.display(d, 'train')
                     key = cv2.waitKey(0)
+                    print(key)
+                    if key == 0x20:
+                        print("Bad data set")
+                        out_file = 'bad_{:05}.bmp'.format(bad_img_count)
+                        bad_img_count += 1
+                        cv2.imwrite(out_file, img)
                     cv2.destroyWindow('train')
                     print("Key pressed: {:}".format(key))
                     response_data.append(key)
@@ -336,7 +351,7 @@ class ScaleOGR():
                     train_data.append(small)
                     print('Inserted training data')
 
-
+        print("Saving training data")
         np.save('train_data', train_data)
         np.save('response_data', response_data)
 
@@ -350,8 +365,9 @@ class ScaleOGR():
         train_height = 40
 
         # Convert the response data into one hot encoding
-        y_train = np.zeros((len(response_data), 10), np.float32)
+        y_train = np.zeros((len(response_data), 11), np.float32)
         response_data -= ord('0')
+        response_data[np.nonzero(response_data < 0)] = 10
         for i, v in enumerate(response_data):
             y_train[i, v] = 1
 
@@ -366,7 +382,7 @@ class ScaleOGR():
         response_data = response_data.astype('float32')
 
         x_train /= 255
-
+             
         model = cv2.ml.KNearest_create()
         model.train(x_train, cv2.ml.ROW_SAMPLE, response_data)
         model.save('model')
@@ -383,6 +399,9 @@ class ScaleOGR():
         train_width -- The max width of the training image
         train_height -- The max height of the training image
         """
+
+        if self.model is None:
+            self.model = self.train()
 
         ret = False
         results = 0
@@ -401,6 +420,8 @@ class ScaleOGR():
             p = np.array(p)
             ret, results = self.model.predict(p)
             for r in results:
+                if r[0] == -1:
+                    print('Error digit')
                 num *= 10
                 num += r[0]
 
@@ -409,14 +430,14 @@ class ScaleOGR():
 
         return num / 10
 
-    def run_training(self):
+    def run_training(self, path):
         """This function performs the training operation on a pre-recorded
         file
         """
-        cap = cv2.VideoCapture('../data/test.mp4')
+        cap = cv2.VideoCapture(path)
         if cap.isOpened():
             self.create_training_data(cap)
-            model = train()
+            model = self.train()
 
     def process(self, img):
         """Process an image using the pre-training model

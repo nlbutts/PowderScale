@@ -59,7 +59,7 @@ def dispense(value):
         print("Setting up OGR")
         ogr = ScaleOGR(False, False)
         stepper = Stepper(1000000)
-        f = Filter(0.5)
+        f = Filter(0.2)
 
         print("Setting up camera")
         camera = PiCamera()
